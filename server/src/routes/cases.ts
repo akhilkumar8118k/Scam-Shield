@@ -167,6 +167,15 @@ router.post('/:id/analyze', async (req: AuthenticatedRequest, res, next) => {
         summary = 'AI analysis unavailable. Programmed checks detected suspicious patterns.';
     }
 
+    // Ensure assessment, summary, and findings do not contradict each other
+    const hasStrictRule = programmedFindings.some(f => !f.source.includes('Uncertain'));
+    if (hasStrictRule && aiResult) {
+        if (assessment === 'few_signals_detected' || assessment === 'insufficient_evidence') {
+            assessment = 'some_concerns';
+            summary = summary + ' However, programmed checks detected concrete risk signals requiring your attention.';
+        }
+    }
+
     const { data: newAnalysis, error: analysisError } = await supabase
       .from('analyses')
       .insert({
