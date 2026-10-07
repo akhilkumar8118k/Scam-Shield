@@ -25,10 +25,10 @@ const AnalysisSchema = z.object({
 
 export type StructuredAnalysis = z.infer<typeof AnalysisSchema>;
 
-export async function analyzeContent(content: string, type: 'message' | 'email' | 'url', language: string = 'en'): Promise<StructuredAnalysis | null> {
+export async function analyzeContent(content: string, type: 'message' | 'email' | 'url', language: string = 'en'): Promise<{ parsed: StructuredAnalysis | null, error: string | null, isFallback: boolean }> {
   if (!process.env.GEMINI_API_KEY) {
     console.warn('GEMINI_API_KEY is not set. Skipping AI analysis.');
-    return null;
+    return { parsed: null, error: 'API key not configured', isFallback: true };
   }
 
   const prompt = `
@@ -44,53 +44,84 @@ export async function analyzeContent(content: string, type: 'message' | 'email' 
     """
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-        model: MODEL,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "object",
-                properties: {
-                    assessment: { type: "string", enum: ["high_concern", "some_concerns", "few_signals_detected", "insufficient_evidence"] },
-                    summary: { type: "string" },
-                    suspicious_findings: { 
-                        type: "array", 
-                        items: { 
-                            type: "object", 
-                            properties: { quote: { type: "string" }, reason: { type: "string" }, source: { type: "string", enum: ["AI"] } },
-                            required: ["quote", "reason", "source"]
-                        } 
-                    },
-                    reassuring_signals: { 
-                        type: "array", 
-                        items: { 
-                            type: "object", 
-                            properties: { quote: { type: "string" }, reason: { type: "string" } },
-                            required: ["quote", "reason"]
-                        } 
-                    },
-                    unknowns: { type: "string" },
-                    recommended_steps: { type: "array", items: { type: "string" } },
-                    likely_category: { type: "string" },
-                    analysis_language: { type: "string" }
-                },
-                required: ["assessment", "summary", "analysis_language"]
-            }
-        }
-    });
-    
-    const resultText = response.text;
-    if (!resultText) return null;
+  let attempts = 0;
+  const maxAttempts = 3;
 
-    const parsed = JSON.parse(resultText);
-    const validated = AnalysisSchema.parse(parsed);
-    return validated;
-  } catch (error) {
-    console.error('Gemini analysis failed:', error);
-    return null;
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      const response = await ai.models.generateContent({
+          model: MODEL,
+          contents: prompt,
+          config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                  type: "object",
+                  properties: {
+                      assessment: { type: "string", enum: ["high_concern", "some_concerns", "few_signals_detected", "insufficient_evidence"] },
+                      summary: { type: "string" },
+                      suspicious_findings: { 
+                          type: "array", 
+                          items: { 
+                              type: "object", 
+                              properties: { quote: { type: "string" }, reason: { type: "string" }, source: { type: "string", enum: ["AI"] } },
+                              required: ["quote", "reason", "source"]
+                          } 
+                      },
+                      reassuring_signals: { 
+                          type: "array", 
+                          items: { 
+                              type: "object", 
+                              properties: { quote: { type: "string" }, reason: { type: "string" } },
+                              required: ["quote", "reason"]
+                          } 
+                      },
+                      unknowns: { type: "string" },
+                      recommended_steps: { type: "array", items: { type: "string" } },
+                      likely_category: { type: "string" },
+                      analysis_language: { type: "string" }
+                  },
+                  required: ["assessment", "summary", "analysis_language"]
+              }
+          }
+      });
+      
+      const resultText = response.text;
+      if (!resultText) return { parsed: null, error: 'Empty response from model', isFallback: true };
+
+      const parsed = JSON.parse(resultText);
+      const validated = AnalysisSchema.parse(parsed);
+      return { parsed: validated, error: null, isFallback: false };
+    } catch (error: any) {
+      console.error(`Gemini analysis attempt ${attempts} failed:`, error.message || error);
+      
+      const status = error?.status || error?.response?.status;
+      const errorMsg = error?.message || '';
+      
+      // Check for daily quota exhaustion (429 with specific metrics)
+      if (status === 429 && (errorMsg.includes('Quota exceeded') || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('free_tier_requests'))) {
+          // Extract suggested retry delay if present, but do not repeatedly retry exhausted quota
+          const retryMatch = errorMsg.match(/retry in ([a-zA-Z0-9.]+)/);
+          const delayStr = retryMatch ? ` Suggested retry in ${retryMatch[1]}.` : '';
+          return { parsed: null, error: `Daily quota exhausted.${delayStr}`, isFallback: true };
+      }
+      
+      // Temporary rate limit or service unavailable
+      if (status === 429 || status === 503) {
+          if (attempts >= maxAttempts) {
+              return { parsed: null, error: `Service unavailable after ${maxAttempts} attempts (${status}).`, isFallback: true };
+          }
+          // Bounded retry with exponential backoff (e.g., 2s, 4s)
+          const backoff = Math.pow(2, attempts) * 1000;
+          await new Promise(res => setTimeout(res, backoff));
+          continue;
+      }
+      
+      // For any other errors (e.g. 404 model not found)
+      return { parsed: null, error: `API Error: ${errorMsg}`, isFallback: true };
+    }
   }
+  return { parsed: null, error: 'Unknown error', isFallback: true };
 }
 
 export function runProgrammedChecks(content: string, type: 'message' | 'email' | 'url') {

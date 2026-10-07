@@ -151,20 +151,27 @@ router.post('/:id/analyze', async (req: AuthenticatedRequest, res, next) => {
     const programmedFindings = runProgrammedChecks(content, type);
     
     // Run AI analysis
-    const aiResult = await analyzeContent(content, type, language);
+    const { parsed: aiResult, error: aiError, isFallback } = await analyzeContent(content, type, language);
     
     let combinedFindings = [...programmedFindings];
     let assessment = aiResult?.assessment || 'insufficient_evidence';
-    let summary = aiResult?.summary || 'AI analysis unavailable. Relying on rule-based checks.';
+    let summary = aiResult?.summary || '';
     
     if (aiResult) {
         combinedFindings = [...combinedFindings, ...aiResult.suspicious_findings];
-    }
-
-    // Fallback if AI fails completely but we found something via rules
-    if (!aiResult && programmedFindings.length > 0) {
-        assessment = 'some_concerns';
-        summary = 'AI analysis unavailable. Programmed checks detected suspicious patterns.';
+    } else {
+        // Fallback mode
+        if (language !== 'en') {
+             assessment = 'insufficient_evidence';
+             summary = `Limited analysis — AI unavailable. Fallback rules only support English. ${aiError || ''}`;
+        } else if (programmedFindings.length > 0) {
+             assessment = 'some_concerns';
+             summary = `Limited analysis — AI unavailable. Programmed checks detected suspicious patterns. ${aiError || ''}`;
+        } else {
+             // Absence of rule findings must not imply low risk
+             assessment = 'insufficient_evidence';
+             summary = `Limited analysis — AI unavailable. ${aiError || ''}`;
+        }
     }
 
     // Ensure assessment, summary, and findings do not contradict each other
@@ -190,7 +197,7 @@ router.post('/:id/analyze', async (req: AuthenticatedRequest, res, next) => {
         recommended_steps: aiResult?.recommended_steps || [],
         likely_category: aiResult?.likely_category || 'unknown',
         analysis_language: language,
-        engine_metadata: { ai_used: !!aiResult, rule_findings: programmedFindings.length }
+        engine_metadata: { ai_used: !isFallback, analysis_mode: isFallback ? 'fallback_rules' : 'ai', rule_findings: programmedFindings.length }
       })
       .select()
       .single();

@@ -1,75 +1,45 @@
 # ScamShield
 
-ScamShield is a full-stack scam detection assistant built for the Build to Ship hackathon. It allows users to submit suspicious messages, emails, or links for risk analysis using AI and programmed checks.
+ScamShield is an advanced AI-powered platform for detecting and analyzing potential scams, phishing attempts, and suspicious links. Built with security-first architecture, it ensures complete user data isolation using Supabase Row Level Security (RLS) and gracefully falls back to programmatic rule checks if AI models are unavailable due to quotas or high demand.
 
 ## Architecture
 
-*   **Frontend**: React, Vite, TypeScript, Tailwind CSS (optional - but using custom CSS for dark navy theme as requested).
-*   **Backend**: Node.js, Express, TypeScript.
-*   **Database**: PostgreSQL via Supabase (accessed only from the server for security).
-*   **AI Engine**: Gemini (via `@google/genai`) for text and URL analysis.
-*   **Authentication**: Custom JWT authentication with sessions stored in the database.
+- **Frontend**: React + Vite (SPA)
+- **Backend**: Node.js + Express (TypeScript)
+- **Database**: PostgreSQL (via Supabase) with strict RLS enforcement
+- **AI Integration**: Google Gemini API for multilingual intent analysis and scam detection
 
-## Environment Variables
+## Key Features
 
-Copy `.env.example` to `.env` in the root (or in `/server`) and fill in the values:
+1. **Multilingual Support**: Can analyze phishing attempts natively in English and Telugu.
+2. **AI-Powered Detection**: Leverages Google Gemini to extract quotes and provide structured reasoning about suspicious patterns.
+3. **Resilient Fallback Engine**: If the Gemini API experiences 429 (Quota Exhausted) or 503 (High Demand), the backend automatically falls back to a deterministic programmatic rules engine, explicitly reporting `Limited analysis — AI unavailable`.
+4. **Strict Data Isolation**: No user can see, modify, or analyze another user's cases. Unauthenticated requests are completely rejected by database-level policies.
 
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-JWT_SECRET=your_jwt_secret
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash
-PORT=3001
-```
+## AI Security & Validation Notes
 
-## Setup & Running Locally
+ScamShield implements multiple layers of safety regarding its AI outputs:
+- **Exact Quotation**: The backend validates that any "evidence" quoted by the AI is an exact substring of the originally submitted content, preventing hallucination.
+- **Quota Resilience**: The API client intelligently distinguishes between temporary `503 Service Unavailable` errors (applying bounded exponential backoff) and hard `429 Quota Exhausted` errors (skipping immediately to the fallback engine).
+- **Rule Alignment**: AI findings are merged with deterministic rule findings. If the rule engine flags a severe credential request, the overall assessment will never be downgraded to "low risk" by an overconfident or unaligned AI response.
 
-1. Install dependencies:
-   ```bash
-   npm run install:all
-   ```
-
-2. Start the development servers (frontend on 5173, backend on 3001):
-   ```bash
-   npm run dev
-   ```
-
-## Deployment
+## Deployment Outline
 
 ### Frontend (Vercel)
-1. Import the repository into Vercel.
-2. Set the Framework Preset to **Vite**.
-3. Set the Root Directory to `client`.
-4. Add the environment variable: `VITE_API_URL` pointing to your backend URL (e.g., `https://scam-shield-server.onrender.com/api`).
-5. Vercel is already configured with `vercel.json` for SPA routing (rewriting all requests to `/index.html`).
+The React frontend is built as a Single Page Application (SPA). The `client/vercel.json` ensures proper routing for React Router by rewriting all paths to `index.html`. 
+Set `VITE_API_URL` to point to the Render backend.
 
 ### Backend (Render)
-1. Create a new Web Service on Render and connect the repository.
-2. Set the Root Directory to `server`.
-3. Build Command: `npm install && npm run build`
-4. Start Command: `npm start`
-5. Environment Variables:
-   - `NODE_ENV`: `production`
-   - `FRONTEND_URL`: Your Vercel frontend URL (e.g., `https://your-frontend.vercel.app`) - crucial for CORS.
-   - `SUPABASE_URL`: Your Supabase URL.
-   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase Service Role Key.
-   - `JWT_SECRET`: Your custom JWT signing secret.
-   - `GEMINI_API_KEY`: Your Google Gemini API key.
-   - `PORT`: (Render provides this automatically).
-Alternatively, use the included `render.yaml` as a blueprint.
-
-## AI Security & Architecture Notes
-- **Direct Database Access Denied**: The frontend never connects to Supabase. Supabase Row Level Security (RLS) is enabled and drops all client connections. The backend connects securely using the `service_role` key, ensuring total control over the query logic and business rules.
-- **Tenant Isolation**: Backend endpoints strictly filter database records using the `user_id` authenticated via JWT, guaranteeing that User A cannot view, edit, or delete User B's cases or analysis history.
-- **AI as Interpreter**: Gemini is used exclusively in JSON mode with strict Zod validation as an analysis engine. It has no tool-use capabilities, no access to external APIs, and no direct database access, minimizing prompt injection risks.
-- **Hybrid Rule Engine**: Programmed rules act as a strict baseline overlay over AI analysis. Clear risk markers (like password requests) are flagged deterministically. The UI clarifies whether a finding came from AI inference or a rigid rule.
-- **Quoted Evidence**: The AI is instructed to return exact substrings of the submitted content to justify its claims, preventing hallucination of non-existent threats.
+The Express backend is configured via `render.yaml`. 
+Required Environment Variables:
+- `FRONTEND_URL` (for CORS)
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- `JWT_SECRET`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL` (e.g., `gemini-2.5-flash`)
 
 ## Demo Outline
-1. **User Registration & Login**: Show secure onboarding without external OAuth dependencies.
-2. **Dashboard Overview**: Demonstrate the dark-navy aesthetic and empty state.
-3. **Submitting a Phishing Message**: Paste a standard "OTP verification" phishing message. Show the loading state while the backend combines rules and Gemini analysis.
-4. **Evidence Board**: Display the analysis results. Highlight how the UI separates AI reasoning from strict programmed rule detections. Show the exact quotes matched from the text.
-5. **Multi-language Support (Telugu)**: Submit a Telugu message and show that the AI accurately interprets the scam and outputs the summary and reasons in Telugu.
-6. **Case History**: Switch to a second user account to prove that the first user's cases are completely invisible and isolated.
+
+1. **User Registration & Isolation**: Create two users. Submit a case as User A. Log in as User B and attempt to access or modify User A's case to demonstrate strict database isolation.
+2. **Ordinary vs. Phishing OTPs**: Submit a safe OTP message and a phishing OTP message. ScamShield will correctly identify the context and intent rather than blindly flagging the word "OTP".
+3. **Fallback Mode Demo**: When Gemini API quotas are exhausted, the app instantly switches to deterministic rules, identifying severe phishing in English while honestly reporting lack of support for Telugu.
