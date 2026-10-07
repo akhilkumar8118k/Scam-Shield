@@ -5,13 +5,20 @@ import cors from 'cors';
 import authRoutes from './routes/auth';
 import casesRoutes from './routes/cases';
 import profileRoutes from './routes/profile';
+import telegramRoutes from './routes/telegram';
 import { errorHandler } from './middleware/error';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    if (!origin || origin.startsWith('http://localhost:') || origin === process.env.FRONTEND_URL) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
@@ -21,6 +28,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/cases', casesRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/telegram-webhook', telegramRoutes);
 
 // Health check endpoint - revealing no credentials
 app.get('/api/health', (req, res) => {

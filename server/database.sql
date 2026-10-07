@@ -115,3 +115,19 @@ DROP TRIGGER IF EXISTS update_cases_modtime ON cases;
 
 CREATE TRIGGER update_users_modtime BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_cases_modtime BEFORE UPDATE ON cases FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+
+-- Table: telegram_logs
+CREATE TABLE IF NOT EXISTS telegram_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    chat_id BIGINT NOT NULL,
+    message_text TEXT NOT NULL,
+    risk_level VARCHAR(50),
+    risk_score INT,
+    summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE telegram_logs ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    CREATE POLICY "Deny all client access to telegram_logs" ON telegram_logs FOR ALL USING (false);
+EXCEPTION WHEN duplicate_object THEN null; END $$;

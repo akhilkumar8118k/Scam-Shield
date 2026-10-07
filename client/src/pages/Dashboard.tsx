@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchApi } from '../api';
 import { PlusCircle, FileText, Mail, Link as LinkIcon, Search } from 'lucide-react';
 import type { Case } from '../../../server/src/types';
+import TelegramLogs from '../components/TelegramLogs';
 
 const getIcon = (type: string) => {
   if (type === 'email') return <Mail size={16} />;
@@ -89,6 +90,9 @@ const Dashboard = () => {
           ))}
         </div>
       )}
+
+      {/* Render the Telegram Logs component */}
+      <TelegramLogs />
     </div>
   );
 };
