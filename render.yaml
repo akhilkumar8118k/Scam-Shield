@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: scam-shield-server
+    env: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: https://your-vercel-app-url.vercel.app # Replace with actual Vercel URL
+      # PORT is automatically managed by Render
+      # Provide SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, GEMINI_API_KEY in Render Dashboard
